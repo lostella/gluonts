@@ -148,7 +148,7 @@ def test_loader_multivariate() -> None:
         with open(tmp_path / "dataset.json", "w") as f:
             f.write("\n".join(lines))
 
-        ds = list(FileDataset(tmp_path, freq="1D", one_dim_target=False))
+        ds = list(FileDataset(tmp_path, freq="1D"))
 
         assert (ds[0]['target'] == [[1, 2, 3]]).all()
         assert ds[0]['start'] == Timestamp('2014-09-07', freq='D')

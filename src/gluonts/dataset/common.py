@@ -194,15 +194,11 @@ class FileDataset(Dataset):
         instance: {"start": "2014-09-07", "target": [0.1, 0.2]}.
     freq
         Time-series frequency. Must be a valid Pandas frequency.
-    one_dim_target
-        Whether to accept only univariate target time-series.
     """
 
-    def __init__(
-        self, path: Path, freq: str, one_dim_target: bool = True
-    ) -> None:
+    def __init__(self, path: Path, freq: str) -> None:
         self.path = path
-        self.process = ProcessDataEntry(freq, one_dim_target=one_dim_target)
+        self.process = ProcessDataEntry(freq)
         assert len(self.files()), f"no valid file found in {path}"
 
     def __iter__(self) -> Iterator[DataEntry]:
@@ -249,13 +245,8 @@ class ListDataset(Dataset):
         Whether to accept only univariate target time-series.
     """
 
-    def __init__(
-        self,
-        data_iter: Iterable[DataEntry],
-        freq: str,
-        one_dim_target: bool = True,
-    ) -> None:
-        process = ProcessDataEntry(freq, one_dim_target)
+    def __init__(self, data_iter: Iterable[DataEntry], freq: str) -> None:
+        process = ProcessDataEntry(freq)
         self.list_data = [process(data) for data in data_iter]
 
     def __iter__(self) -> Iterator[DataEntry]:
@@ -322,7 +313,7 @@ class ProcessStartField:
         )
 
 
-class ProcessTimeSeriesField:
+class ProcessArrayField:
     """
     Converts a time series field identified by `name` from a list of numbers
     into a numpy array.
@@ -330,14 +321,7 @@ class ProcessTimeSeriesField:
     Constructor parameters modify the conversion logic in the following way:
 
     If `is_required=True`, throws a `GluonTSDataError` if the field is not
-    present in the `Data` dictionary.
-
-    If `is_cat=True`, the array type is `np.int32`, otherwise it is
-    `np.float32`.
-
-    If `is_static=True`, asserts that the resulting array is 1D,
-    otherwise asserts that the resulting array is 2D. 2D dynamic arrays of
-    shape (T) are automatically expanded to shape (1,T).
+    present in the data dictionary.
 
     Parameters
     ----------
@@ -345,38 +329,20 @@ class ProcessTimeSeriesField:
         Name of the field to process.
     is_required
         Whether the field must be present.
-    is_cat
-        Whether the field refers to categorical (i.e. integer) values.
-    is_static
-        Whether the field is supposed to have a time dimension.
     """
 
     # TODO: find a fast way to assert absence of nans.
 
-    def __init__(
-        self, name, is_required: bool, is_static: bool, is_cat: bool
-    ) -> None:
+    def __init__(self, name, is_required: bool, dtype=np.float32) -> None:
         self.name = name
         self.is_required = is_required
-        self.req_ndim = 1 if is_static else 2
-        self.dtype = np.int32 if is_cat else np.float32
+        self.dtype = dtype
 
     def __call__(self, data: DataEntry) -> DataEntry:
         value = data.get(self.name, None)
         if value is not None:
             value = np.asarray(value, dtype=self.dtype)
-            ddiff = self.req_ndim - value.ndim
-
-            if ddiff == 1:
-                value = np.expand_dims(a=value, axis=0)
-            elif ddiff != 0:
-                raise GluonTSDataError(
-                    f"JSON array has bad shape - expected {self.req_ndim} "
-                    f"dimensions, got {ddiff}"
-                )
-
             data[self.name] = value
-
             return data
         elif not self.is_required:
             return data
@@ -387,7 +353,7 @@ class ProcessTimeSeriesField:
 
 
 class ProcessDataEntry:
-    def __init__(self, freq: str, one_dim_target: bool = True) -> None:
+    def __init__(self, freq: str) -> None:
         # TODO: create a FormatDescriptor object that can be derived from a
         # TODO: Metadata and pass it instead of freq.
         # TODO: In addition to passing freq, the descriptor should be carry
@@ -396,36 +362,20 @@ class ProcessDataEntry:
             List[Callable[[DataEntry], DataEntry]],
             [
                 ProcessStartField("start", freq=freq),
-                # The next line abuses is_static=True in case of 1D targets.
-                ProcessTimeSeriesField(
-                    "target",
-                    is_required=True,
-                    is_cat=False,
-                    is_static=one_dim_target,
+                ProcessArrayField(
+                    "target", is_required=True, dtype=np.float32
                 ),
-                ProcessTimeSeriesField(
-                    "feat_dynamic_cat",
-                    is_required=False,
-                    is_cat=True,
-                    is_static=False,
+                ProcessArrayField(
+                    "feat_dynamic_cat", is_required=False, dtype=np.int32
                 ),
-                ProcessTimeSeriesField(
-                    "feat_dynamic_real",
-                    is_required=False,
-                    is_cat=False,
-                    is_static=False,
+                ProcessArrayField(
+                    "feat_dynamic_real", is_required=False, dtype=np.float32
                 ),
-                ProcessTimeSeriesField(
-                    "feat_static_cat",
-                    is_required=False,
-                    is_cat=True,
-                    is_static=True,
+                ProcessArrayField(
+                    "feat_static_cat", is_required=False, dtype=np.int32
                 ),
-                ProcessTimeSeriesField(
-                    "feat_static_real",
-                    is_required=False,
-                    is_cat=False,
-                    is_static=True,
+                ProcessArrayField(
+                    "feat_static_real", is_required=False, dtype=np.float32
                 ),
             ],
         )

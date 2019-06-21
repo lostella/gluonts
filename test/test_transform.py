@@ -324,7 +324,6 @@ def test_multi_dim_transformation(is_train):
     ds = gluonts.dataset.common.ListDataset(
         data_iter=[{'start': '2012-01-01', 'target': [first_dim, second_dim]}],
         freq='1D',
-        one_dim_target=False,
     )
     pred_length = 2
 
