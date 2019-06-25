@@ -1,5 +1,5 @@
 # Standard library imports
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 # Third-party imports
 from mxnet.gluon import HybridBlock
@@ -74,8 +74,6 @@ class DeepAREstimator(GluonEstimator):
         (default: 100)
     dropout_rate
         Dropout regularization parameter (default: 0.1)
-    cardinality
-        Number of values of the each categorical feature (default: [1])
     embedding_dimension
         Dimension of the embeddings for categorical features (the same
         dimension is used for all embeddings, default: 5)
@@ -105,9 +103,6 @@ class DeepAREstimator(GluonEstimator):
         cell_type: str = 'lstm',
         num_eval_samples: int = 100,
         dropout_rate: float = 0.1,
-        use_feat_dynamic_real: bool = False,
-        use_feat_static_cat: bool = False,
-        cardinality: Optional[List[int]] = None,
         embedding_dimension: int = 20,
         distr_output: DistributionOutput = StudentTOutput(),
         scaling: bool = True,
@@ -129,12 +124,6 @@ class DeepAREstimator(GluonEstimator):
         ), "The value of `num_eval_samples` should be > 0"
         assert dropout_rate >= 0, "The value of `dropout_rate` should be >= 0"
         assert (
-            cardinality is not None or not use_feat_static_cat
-        ), "You must set `cardinality` if `use_feat_static_cat=True`"
-        assert cardinality is None or [
-            c > 0 for c in cardinality
-        ], "Elements of `cardinality` should be > 0"
-        assert (
             embedding_dimension > 0
         ), "The value of `embedding_dimension` should be > 0"
 
@@ -149,9 +138,6 @@ class DeepAREstimator(GluonEstimator):
         self.cell_type = cell_type
         self.num_sample_paths = num_eval_samples
         self.dropout_rate = dropout_rate
-        self.use_feat_dynamic_real = use_feat_dynamic_real
-        self.use_feat_static_cat = use_feat_static_cat
-        self.cardinality = cardinality if use_feat_static_cat else [1]
         self.embedding_dimension = embedding_dimension
         self.scaling = scaling
         self.lags_seq = (
@@ -167,19 +153,19 @@ class DeepAREstimator(GluonEstimator):
 
         self.history_length = self.context_length + max(self.lags_seq)
 
-    def create_transformation(self) -> Transformation:
+    def create_transformation(self, schema: Dict) -> Transformation:
         remove_field_names = [
             FieldName.FEAT_DYNAMIC_CAT,
             FieldName.FEAT_STATIC_REAL,
         ]
-        if not self.use_feat_dynamic_real:
+        if FieldName.FEAT_DYNAMIC_REAL not in schema.keys():
             remove_field_names.append(FieldName.FEAT_DYNAMIC_REAL)
 
         return Chain(
             [RemoveFields(field_names=remove_field_names)]
             + (
                 [SetField(output_field=FieldName.FEAT_STATIC_CAT, value=[0.0])]
-                if not self.use_feat_static_cat
+                if FieldName.FEAT_STATIC_CAT not in schema.keys()
                 else []
             )
             + [
@@ -211,7 +197,7 @@ class DeepAREstimator(GluonEstimator):
                     input_fields=[FieldName.FEAT_TIME, FieldName.FEAT_AGE]
                     + (
                         [FieldName.FEAT_DYNAMIC_REAL]
-                        if self.use_feat_dynamic_real
+                        if FieldName.FEAT_DYNAMIC_REAL in schema.keys()
                         else []
                     ),
                 ),
@@ -231,7 +217,7 @@ class DeepAREstimator(GluonEstimator):
             ]
         )
 
-    def create_training_network(self) -> DeepARTrainingNetwork:
+    def create_training_network(self, schema: Dict) -> DeepARTrainingNetwork:
         return DeepARTrainingNetwork(
             num_layers=self.num_layers,
             num_cells=self.num_cells,
@@ -241,14 +227,21 @@ class DeepAREstimator(GluonEstimator):
             prediction_length=self.prediction_length,
             distr_output=self.distr_output,
             dropout_rate=self.dropout_rate,
-            cardinality=self.cardinality,
+            cardinality=(
+                schema[FieldName.FEAT_STATIC_CAT]["cardinality"]
+                if FieldName.FEAT_STATIC_CAT in schema.keys()
+                else [1]
+            ),
             embedding_dimension=self.embedding_dimension,
             lags_seq=self.lags_seq,
             scaling=self.scaling,
         )
 
     def create_predictor(
-        self, transformation: Transformation, trained_network: HybridBlock
+        self,
+        transformation: Transformation,
+        trained_network: HybridBlock,
+        schema: Dict,
     ) -> Predictor:
         prediction_network = DeepARPredictionNetwork(
             num_sample_paths=self.num_sample_paths,
@@ -260,7 +253,11 @@ class DeepAREstimator(GluonEstimator):
             prediction_length=self.prediction_length,
             distr_output=self.distr_output,
             dropout_rate=self.dropout_rate,
-            cardinality=self.cardinality,
+            cardinality=(
+                schema[FieldName.FEAT_STATIC_CAT]["cardinality"]
+                if FieldName.FEAT_STATIC_CAT in schema.keys()
+                else [1]
+            ),
             embedding_dimension=self.embedding_dimension,
             lags_seq=self.lags_seq,
             scaling=self.scaling,

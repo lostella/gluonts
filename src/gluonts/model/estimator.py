@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 # Third-party imports
-from typing import Tuple
+from typing import Tuple, Dict
 
 # Standard library imports
 import numpy as np
@@ -25,6 +25,7 @@ from gluonts.core.component import DType, from_hyperparameters, validated
 from gluonts.core.exception import GluonTSHyperparametersError
 from gluonts.dataset.common import Dataset
 from gluonts.dataset.loader import TrainDataLoader
+from gluonts.dataset.schema import DatasetSchema
 from gluonts.model.predictor import Predictor
 from gluonts.support.util import get_hybrid_forward_input_names
 from gluonts.trainer import Trainer
@@ -118,7 +119,7 @@ class GluonEstimator(Estimator):
         except ValidationError as e:
             raise GluonTSHyperparametersError from e
 
-    def create_transformation(self) -> Transformation:
+    def create_transformation(self, schema: Dict) -> Transformation:
         """
         Create and return the transformation needed for training and inference.
 
@@ -130,7 +131,7 @@ class GluonEstimator(Estimator):
         """
         raise NotImplementedError
 
-    def create_training_network(self) -> HybridBlock:
+    def create_training_network(self, schema: Dict) -> HybridBlock:
         """
         Create and return the network used for training (i.e., computing the
         loss).
@@ -143,7 +144,10 @@ class GluonEstimator(Estimator):
         raise NotImplementedError
 
     def create_predictor(
-        self, transformation: Transformation, trained_network: HybridBlock
+        self,
+        transformation: Transformation,
+        trained_network: HybridBlock,
+        schema: Dict,
     ) -> Predictor:
         """
         Create and return a predictor object.
@@ -158,7 +162,9 @@ class GluonEstimator(Estimator):
     def train_model(
         self, training_data: Dataset
     ) -> Tuple[Transformation, HybridBlock]:
-        transformation = self.create_transformation()
+        dataset_schema = DatasetSchema(training_data)
+
+        transformation = self.create_transformation(dataset_schema.schema)
 
         transformation.estimate(iter(training_data))
 
@@ -174,7 +180,7 @@ class GluonEstimator(Estimator):
         # ensure that the training network is created within the same MXNet
         # context as the one that will be used during training
         with self.trainer.ctx:
-            trained_net = self.create_training_network()
+            trained_net = self.create_training_network(dataset_schema.schema)
 
         self.trainer(
             net=trained_net,
