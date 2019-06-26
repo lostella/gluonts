@@ -1,5 +1,5 @@
 # Standard library imports
-from typing import Collection, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 # Third-party imports
 import mxnet as mx
@@ -32,7 +32,7 @@ class DeepARNetwork(mx.gluon.HybridBlock):
         prediction_length: int,
         distr_output: DistributionOutput,
         dropout_rate: float,
-        cardinality: Collection[int],
+        cardinality: List[int],
         embedding_dimension: int,
         lags_seq: List[int],
         scaling: bool = True,

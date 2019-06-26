@@ -12,7 +12,7 @@
 # permissions and limitations under the License.
 
 # Third-party imports
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 
 # Standard library imports
 import numpy as np
@@ -160,11 +160,15 @@ class GluonEstimator(Estimator):
         raise NotImplementedError
 
     def train_model(
-        self, training_data: Dataset
+        self,
+        training_data: Dataset,
+        schema: Optional[Dict]=None,
     ) -> Tuple[Transformation, HybridBlock]:
-        dataset_schema = DatasetSchema(training_data)
+        if schema is None:
+            dataset_schema = DatasetSchema(training_data)
+            schema = dataset_schema.schema
 
-        transformation = self.create_transformation(dataset_schema.schema)
+        transformation = self.create_transformation(schema)
 
         transformation.estimate(iter(training_data))
 
@@ -180,7 +184,7 @@ class GluonEstimator(Estimator):
         # ensure that the training network is created within the same MXNet
         # context as the one that will be used during training
         with self.trainer.ctx:
-            trained_net = self.create_training_network(dataset_schema.schema)
+            trained_net = self.create_training_network(schema)
 
         self.trainer(
             net=trained_net,
