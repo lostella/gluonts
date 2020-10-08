@@ -15,7 +15,8 @@ from typing import Iterable, Iterator, Callable, Optional, List
 import itertools
 import random
 import logging
-from multiprocessing import Process, Manager, Queue
+import multiprocessing
+from multiprocessing import Pool, Manager, Queue
 from multiprocessing.reduction import ForkingPickler
 import io
 import pickle
@@ -27,6 +28,8 @@ from gluonts.dataset.util import MPWorkerInfo, batcher
 from gluonts.transform import Transformation
 from gluonts.transform.dataset import TransformedDataset
 
+if sys.platform == "unix":
+    multiprocessing.set_start_method("spawn", force=True)
 
 logger = logging.getLogger(__name__)
 
@@ -78,20 +81,43 @@ class PseudoShuffledIterator(Iterator):
         return next_sample
 
 
+def construct_training_iterator(
+    dataset: Dataset,
+    *,
+    transform: Transformation,
+    shuffle_buffer_length: Optional[int] = None,
+):
+    transformed_dataset = TransformedDataset(
+        Cycle(dataset), transform, is_train=True,
+    )
+
+    shuffled_iterator: Iterable[DataEntry] = (
+        iter(transformed_dataset)
+        if shuffle_buffer_length is None
+        else PseudoShuffledIterator(
+            iter(transformed_dataset),
+            shuffle_buffer_length=shuffle_buffer_length,
+        )
+    )
+
+    return shuffled_iterator
+
+
 class MultiProcessBatcher(Iterator):
     def __init__(
         self,
-        base_iterable: Iterable,
+        dataset: Dataset,
+        transform: Transformation,
         batch_size: int,
         stack_fn: Callable,
         num_workers: int,
         max_queue_size: Optional[int] = None,
+        shuffle_buffer_length: Optional[int] = None,
         decode_fn: Callable = lambda x: x,
     ):
         assert num_workers >= 1
         assert max_queue_size is None or max_queue_size >= num_workers
 
-        self.base_iterable = base_iterable
         self.batch_size = batch_size
         self.stack_fn = stack_fn
         self.decode_fn = decode_fn
@@ -106,15 +132,27 @@ class MultiProcessBatcher(Iterator):
         self.exhausted_events = [
             self.manager.Event() for _ in range(self.num_workers)
         ]
-        self.processes = []
 
-        for worker_id, event in enumerate(self.exhausted_events):
-            p = Process(
-                target=self.worker_fn,
+        id_queue = self.manager.Queue()
+        for worker_id in range(num_workers):
+            id_queue.put(worker_id)
+
+        self.pool = Pool(
+            num_workers,
+            initializer=self.worker_init,
+            initargs=(
+                num_workers,
+                id_queue,
+                dataset,
+                transform,
+                shuffle_buffer_length,
+            ),
+        )
+
+        for event in self.exhausted_events:
+            self.pool.apply_async(
+                func=self.worker_fn,
                 args=(
-                    worker_id,
-                    self.num_workers,
-                    self.base_iterable,
                     self.batch_size,
                     self.stack_fn,
                     self.batch_queue,
@@ -122,25 +160,39 @@ class MultiProcessBatcher(Iterator):
                     event,
                 ),
             )
-            p.start()
-            self.processes.append(p)
 
         self.count = 0
 
     @staticmethod
+    def worker_init(
+        num_workers, id_queue, dataset, transform, shuffle_buffer_length
+    ):
+        worker_id = id_queue.get()
+        data_iterable = construct_training_iterator(
+            dataset,
+            transform=transform,
+            shuffle_buffer_length=shuffle_buffer_length,
+        )
+        MPWorkerInfo.set_worker_info(
+            num_workers=num_workers,
+            worker_id=worker_id,
+            data_iterable=data_iterable,
+        )
+
+    @staticmethod
     def worker_fn(
-        worker_id: int,
-        num_workers: int,
-        iterable: Iterable,
         batch_size: int,
         stack_fn: Callable,
         batch_queue: Queue,
         terminate_event,
         exhausted_event,
     ):
-        MPWorkerInfo.worker_process = True
-        MPWorkerInfo.worker_id = worker_id
-        MPWorkerInfo.num_workers = num_workers
+
+        worker_id = MPWorkerInfo.worker_id
+        iterable = MPWorkerInfo.data_iterable
+
+        assert worker_id is not None
+        assert iterable is not None
 
         for batch in batcher(iterable, batch_size):
             stacked_batch = stack_fn(batch)
@@ -165,7 +217,6 @@ class MultiProcessBatcher(Iterator):
             all(event.is_set() for event in self.exhausted_events)
             and self.batch_queue.empty()
         ):
-            self._halt_processes()
             raise StopIteration
 
         try:
@@ -185,14 +236,6 @@ class MultiProcessBatcher(Iterator):
                 self.batch_queue.get(block=False)
         except (Empty, FileNotFoundError):
             pass
-
-    def _halt_processes(self):
-        # Send termination message to workers
-        self.terminate_event.set()
-        # Empty queue to make sure workers get the message
-        self._empty_queue()
-        for p in self.processes:
-            p.join()
 
 
 class DataLoader(Iterable[DataBatch]):
@@ -230,31 +273,24 @@ class TrainDataLoader(DataLoader):
         self.num_prefetch = num_prefetch
         self.shuffle_buffer_length = shuffle_buffer_length
 
-        transformed_dataset = TransformedDataset(
-            Cycle(dataset), transform, is_train=True,
-        )
-
-        shuffled_iterator: Iterable[DataEntry] = (
-            iter(transformed_dataset)
-            if shuffle_buffer_length is None
-            else PseudoShuffledIterator(
-                iter(transformed_dataset),
+        if self.num_workers is None:
+            iterator = construct_training_iterator(
+                dataset,
+                transform=transform,
                 shuffle_buffer_length=shuffle_buffer_length,
             )
-        )
-
-        self.batch_iterator = (
-            map(stack_fn, batcher(shuffled_iterator, batch_size))
-            if self.num_workers is None
-            else MultiProcessBatcher(
-                shuffled_iterator,
+            self.batch_iterator = map(stack_fn, batcher(iterator, batch_size))
+        else:
+            self.batch_iterator = MultiProcessBatcher(
+                dataset,
+                transform=transform,
                 batch_size=batch_size,
                 stack_fn=stack_fn,
                 decode_fn=decode_fn,
                 num_workers=self.num_workers,
                 max_queue_size=num_prefetch,
+                shuffle_buffer_length=shuffle_buffer_length,
             )
-        )
 
     def __len__(self):
         return self.num_batches_per_epoch
