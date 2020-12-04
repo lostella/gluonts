@@ -16,9 +16,12 @@ from typing import List, Tuple
 import mxnet as mx
 
 from gluonts.core.component import validated
+from gluonts.model.forecast_generator import SampleForecastGenerator
+from gluonts.mx.model.predictor import RepresentableBlockPredictor
 from gluonts.mx import Tensor
 from gluonts.mx.block.scaler import MeanScaler, NOPScaler
-from gluonts.mx.distribution import DistributionOutput
+from gluonts.mx.distribution import DistributionOutput, StudentTOutput
+from gluonts.mx.model.forecast_generator import DistributionForecastGenerator
 from gluonts.mx.util import weighted_average
 
 
@@ -55,16 +58,28 @@ class SimpleFeedForwardNetworkBase(mx.gluon.HybridBlock):
     @validated()
     def __init__(
         self,
-        num_hidden_dimensions: List[int],
+        freq: str,
         prediction_length: int,
         context_length: int,
-        batch_normalization: bool,
-        mean_scaling: bool,
-        distr_output: DistributionOutput,
+        num_hidden_dimensions: List[int],
+        batch_normalization: bool = False,
+        mean_scaling: bool = True,
+        distr_output: DistributionOutput = StudentTOutput(),
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
 
+        assert (
+            prediction_length > 0
+        ), "The value of `prediction_length` should be > 0"
+        assert (
+            context_length is None or context_length > 0
+        ), "The value of `context_length` should be > 0"
+        assert num_hidden_dimensions is None or (
+            [d > 0 for d in num_hidden_dimensions]
+        ), "Elements of `num_hidden_dimensions` should be > 0"
+
+        self.freq = freq
         self.num_hidden_dimensions = num_hidden_dimensions
         self.prediction_length = prediction_length
         self.context_length = context_length
@@ -125,6 +140,81 @@ class SimpleFeedForwardNetworkBase(mx.gluon.HybridBlock):
         return distr_args, loc, scale
 
 
+class SimpleFeedForwardSamplingNetwork(SimpleFeedForwardNetworkBase):
+    @validated()
+    def __init__(
+        self, num_parallel_samples: int = 100, *args, **kwargs
+    ) -> None:
+        super().__init__(*args, **kwargs)
+
+        assert (
+            num_parallel_samples > 0
+        ), "The value of `num_parallel_samples` should be > 0"
+
+        self.num_parallel_samples = num_parallel_samples
+
+    # noinspection PyMethodOverriding,PyPep8Naming
+    def hybrid_forward(self, F, past_target: Tensor) -> Tensor:
+        """
+        Computes a probability distribution for future data given the past,
+        and draws samples from it.
+
+        Parameters
+        ----------
+        F
+        past_target
+            Tensor with past observations.
+            Shape: (batch_size, context_length, target_dim).
+
+        Returns
+        -------
+        Tensor
+            Prediction sample. Shape: (batch_size, samples, prediction_length).
+        """
+
+        distr_args, loc, scale = self.get_distr_args(F, past_target)
+        distr = self.distr_output.distribution(
+            distr_args, loc=loc, scale=scale
+        )
+
+        # (num_samples, batch_size, prediction_length)
+        samples = distr.sample(self.num_parallel_samples)
+
+        # (batch_size, num_samples, prediction_length)
+        return samples.swapaxes(0, 1)
+
+
+class SimpleFeedForwardDistributionNetwork(SimpleFeedForwardNetworkBase):
+    @validated()
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+    # noinspection PyMethodOverriding,PyPep8Naming
+    def hybrid_forward(self, F, past_target: Tensor) -> Tensor:
+        """
+        Computes the parameters of distribution for future data given the past,
+        and draws samples from it.
+
+        Parameters
+        ----------
+        F
+        past_target
+            Tensor with past observations.
+            Shape: (batch_size, context_length, target_dim).
+
+        Returns
+        -------
+        Tensor
+            The parameters of distribution.
+        Tensor
+            An array containing the location (shift) of the distribution.
+        Tensor
+            An array containing the scale of the distribution.
+        """
+        distr_args, loc, scale = self.get_distr_args(F, past_target)
+        return distr_args, loc, scale
+
+
 class SimpleFeedForwardTrainingNetwork(SimpleFeedForwardNetworkBase):
     # noinspection PyMethodOverriding,PyPep8Naming
     def hybrid_forward(
@@ -171,75 +261,55 @@ class SimpleFeedForwardTrainingNetwork(SimpleFeedForwardNetworkBase):
         # (batch_size, )
         return weighted_loss
 
+    def to_prediction_network(
+        self, sampling: bool = False, num_parallel_samples: int = 100
+    ) -> SimpleFeedForwardNetworkBase:
+        if sampling:
+            return SimpleFeedForwardSamplingNetwork(
+                freq=self.freq,
+                num_hidden_dimensions=self.num_hidden_dimensions,
+                prediction_length=self.prediction_length,
+                context_length=self.context_length,
+                distr_output=self.distr_output,
+                batch_normalization=self.batch_normalization,
+                mean_scaling=self.mean_scaling,
+                params=self.collect_params(),
+                num_parallel_samples=num_parallel_samples,
+            )
+        else:
+            return SimpleFeedForwardDistributionNetwork(
+                freq=self.freq,
+                num_hidden_dimensions=self.num_hidden_dimensions,
+                prediction_length=self.prediction_length,
+                context_length=self.context_length,
+                distr_output=self.distr_output,
+                batch_normalization=self.batch_normalization,
+                mean_scaling=self.mean_scaling,
+                params=self.collect_params(),
+            )
 
-class SimpleFeedForwardSamplingNetwork(SimpleFeedForwardNetworkBase):
-    @validated()
-    def __init__(
-        self, num_parallel_samples: int = 100, *args, **kwargs
-    ) -> None:
-        super().__init__(*args, **kwargs)
-        self.num_parallel_samples = num_parallel_samples
-
-    # noinspection PyMethodOverriding,PyPep8Naming
-    def hybrid_forward(self, F, past_target: Tensor) -> Tensor:
-        """
-        Computes a probability distribution for future data given the past,
-        and draws samples from it.
-
-        Parameters
-        ----------
-        F
-        past_target
-            Tensor with past observations.
-            Shape: (batch_size, context_length, target_dim).
-
-        Returns
-        -------
-        Tensor
-            Prediction sample. Shape: (batch_size, samples, prediction_length).
-        """
-
-        distr_args, loc, scale = self.get_distr_args(F, past_target)
-        distr = self.distr_output.distribution(
-            distr_args, loc=loc, scale=scale
+    def to_predictor(
+        self,
+        transformation,
+        ctx,
+        batch_size: int = 32,
+        sampling: bool = False,
+        num_parallel_samples: int = 100,
+    ):
+        prediction_network = self.to_prediction_network(
+            sampling=sampling, num_parallel_samples=num_parallel_samples
         )
-
-        # (num_samples, batch_size, prediction_length)
-        samples = distr.sample(self.num_parallel_samples)
-
-        # (batch_size, num_samples, prediction_length)
-        return samples.swapaxes(0, 1)
-
-
-class SimpleFeedForwardDistributionNetwork(SimpleFeedForwardNetworkBase):
-    @validated()
-    def __init__(
-        self, num_parallel_samples: int = 100, *args, **kwargs
-    ) -> None:
-        super().__init__(*args, **kwargs)
-        self.num_parallel_samples = num_parallel_samples
-
-    # noinspection PyMethodOverriding,PyPep8Naming
-    def hybrid_forward(self, F, past_target: Tensor) -> Tensor:
-        """
-        Computes the parameters of distribution for future data given the past,
-        and draws samples from it.
-
-        Parameters
-        ----------
-        F
-        past_target
-            Tensor with past observations.
-            Shape: (batch_size, context_length, target_dim).
-
-        Returns
-        -------
-        Tensor
-            The parameters of distribution.
-        Tensor
-            An array containing the location (shift) of the distribution.
-        Tensor
-            An array containing the scale of the distribution.
-        """
-        distr_args, loc, scale = self.get_distr_args(F, past_target)
-        return distr_args, loc, scale
+        forecast_generator = (
+            SampleForecastGenerator()
+            if sampling == True
+            else DistributionForecastGenerator(self.distr_output)
+        )
+        return RepresentableBlockPredictor(
+            input_transform=transformation,
+            prediction_net=prediction_network,
+            batch_size=batch_size,
+            forecast_generator=forecast_generator,
+            freq=self.freq,
+            prediction_length=self.prediction_length,
+            ctx=ctx,
+        )

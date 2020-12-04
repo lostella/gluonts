@@ -302,7 +302,6 @@ class SimpleFeedForwardEstimator(GluonEstimator):
                 batch_normalization=self.batch_normalization,
                 mean_scaling=self.mean_scaling,
                 params=trained_network.collect_params(),
-                num_parallel_samples=self.num_parallel_samples,
             )
             return RepresentableBlockPredictor(
                 input_transform=transformation + prediction_splitter,
