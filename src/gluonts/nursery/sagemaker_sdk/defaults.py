@@ -27,6 +27,7 @@ PYTHON_VERSION = "py3"
 # Training related
 ENTRY_POINTS_FOLDER = Path(__file__).parent.resolve() / "entry_point_scripts"
 TRAIN_SCRIPT = "train_entry_point.py"
+SERVE_SCRIPT = "serve_entry_point.py"
 MONITORED_METRICS = "mean_wQuantileLoss", "ND", "RMSE"
 NUM_SAMPLES = 100
 QUANTILES = 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9

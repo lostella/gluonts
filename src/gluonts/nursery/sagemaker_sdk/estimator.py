@@ -43,6 +43,7 @@ from .defaults import (
     PYTHON_VERSION,
     QUANTILES,
     TRAIN_SCRIPT,
+    SERVE_SCRIPT,
 )
 from .model import GluonTSModel
 from .utils import make_job_name, make_metrics
@@ -343,7 +344,7 @@ class GluonTSFramework(Framework):
             To use a custom GluonTS version just import your custom GluonTS
             version and then call::
 
-                 GluonTSFramework(
+                GluonTSFramework(
                     entry_point='train.py',
                     dependencies=[gluonts.__path__[0]]
                 )
@@ -357,8 +358,8 @@ class GluonTSFramework(Framework):
             will have to use a GPU instance.
             Example::
 
-                 '123.dkr.ecr.us-west-2.amazonaws.com/my-custom-image:1.0'
-                 'custom-image:latest'
+                '123.dkr.ecr.us-west-2.amazonaws.com/my-custom-image:1.0'
+                'custom-image:latest'
 
             If not specified, them image from the Estimator will be used.
         **kwargs:
@@ -372,17 +373,16 @@ class GluonTSFramework(Framework):
         """
 
         return GluonTSModel(
-            self.model_data,
-            role or self.role,
-            entry_point or self.entry_point,
+            model_data=self.model_data,
+            image_uri=(image_uri or self.image_uri),
+            role=role or self.role,
+            entry_point=entry_point or str(ENTRY_POINTS_FOLDER / SERVE_SCRIPT),
+            framework_version=self.framework_version,
             source_dir=(source_dir or self._model_source_dir()),
-            enable_cloudwatch_metrics=self.enable_cloudwatch_metrics,
+            model_server_workers=model_server_workers,
             name=self._current_job_name,
             container_log_level=self.container_log_level,
             code_location=self.code_location,
-            framework_version=self.framework_version,
-            image_uri=(image_uri or self.image_uri),
-            model_server_workers=model_server_workers,
             sagemaker_session=self.sagemaker_session,
             vpc_config=self.get_vpc_config(vpc_config_override),
             dependencies=(dependencies or self.dependencies),

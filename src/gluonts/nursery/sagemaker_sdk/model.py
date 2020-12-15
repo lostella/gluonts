@@ -72,9 +72,9 @@ class GluonTSModel(FrameworkModel):
     def __init__(
         self,
         model_data,
+        image_uri,
         role,
         entry_point,
-        image: str = None,
         framework_version: str = GLUONTS_VERSION,
         predictor_cls=GluonTSPredictor,  # (callable[str, session.Session])
         model_server_workers: int = None,
@@ -97,7 +97,7 @@ class GluonTSModel(FrameworkModel):
             Path (absolute or relative) to the Python source
             file which should be executed as the entry point to model
             hosting. This should be compatible with Python 3.6.
-        image:
+        image_uri:
             A Docker image URI (default: None).
         framework_version:
             GluonTS version you want to use for executing your model training code.
@@ -113,10 +113,10 @@ class GluonTSModel(FrameworkModel):
         """
 
         super(GluonTSModel, self).__init__(
-            model_data,
-            image,
-            role,
-            entry_point,
+            model_data=model_data,
+            image_uri=image_uri,
+            role=role,
+            entry_point=entry_point,
             predictor_cls=predictor_cls,
             **kwargs,
         )
@@ -157,7 +157,7 @@ class GluonTSModel(FrameworkModel):
             self.framework_version
         ) >= parse_version(self._LOWEST_MMS_VERSION)
 
-        deploy_image = self.image
+        deploy_image = self.image_uri
 
         # TODO implement proper logic handling images when none are provided by user
         # Example implementation:
