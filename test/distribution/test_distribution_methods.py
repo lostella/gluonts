@@ -75,7 +75,7 @@ test_cases = [
     ),
     (
         NegativeBinomial,
-        {"mu": mx.nd.array([1000.0, 1.0]), "alpha": mx.nd.array([1.0, 2.0])},
+        {"k": mx.nd.array([100.0, 2.0]), "logit": mx.nd.array([-0.4, 0.4])},
     ),
     (
         Uniform,
@@ -181,9 +181,9 @@ test_output = {
         "variance": mx.nd.array([1.909091, 12.0]),
     },
     "NegativeBinomial": {
-        "mean": mx.nd.array([1000.0, 1.0]),
-        "stddev": mx.nd.array([1000.4999, 1.7320508]),
-        "variance": mx.nd.array([1.001e06, 3.000e00]),
+        "mean": mx.nd.array([67.0320046, 2.9836494]),
+        "stddev": mx.nd.array([10.58134684, 2.72667036]),
+        "variance": mx.nd.array([111.96490102, 7.43473125]),
     },
     "Uniform": {
         "mean": mx.nd.array([1500.0, -1000.05]),

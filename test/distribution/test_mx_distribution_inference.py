@@ -659,28 +659,28 @@ def test_deterministic_l1(mu: float, hybridize: bool) -> None:
     ), f"mu did not match: mu = {mu}, mu_hat = {mu_hat}"
 
 
-@pytest.mark.parametrize("mu_alpha", [(2.5, 0.7)])
+@pytest.mark.parametrize("k_logit", [(3.0, 1.0)])
 @pytest.mark.parametrize("hybridize", [True, False])
-def test_neg_binomial(mu_alpha: Tuple[float, float], hybridize: bool) -> None:
+def test_neg_binomial(k_logit: Tuple[float, float], hybridize: bool) -> None:
     """
     Test to check that maximizing the likelihood recovers the parameters
     """
     # test instance
-    mu, alpha = mu_alpha
+    k, logit = k_logit
 
     # generate samples
-    mus = mx.nd.zeros((NUM_SAMPLES,)) + mu
-    alphas = mx.nd.zeros((NUM_SAMPLES,)) + alpha
+    ks = mx.nd.zeros((NUM_SAMPLES,)) + k
+    logits = mx.nd.zeros((NUM_SAMPLES,)) + logit
 
-    neg_bin_distr = NegativeBinomial(mu=mus, alpha=alphas)
+    neg_bin_distr = NegativeBinomial(k=ks, logit=logits)
     samples = neg_bin_distr.sample()
 
     init_biases = [
-        inv_softplus(mu - START_TOL_MULTIPLE * TOL * mu),
-        inv_softplus(alpha + START_TOL_MULTIPLE * TOL * alpha),
+        inv_softplus(k - START_TOL_MULTIPLE * TOL * k),
+        logit - START_TOL_MULTIPLE * TOL * logit,
     ]
 
-    mu_hat, alpha_hat = maximum_likelihood_estimate_sgd(
+    k_hat, logit_hat = maximum_likelihood_estimate_sgd(
         NegativeBinomialOutput(),
         samples,
         hybridize=hybridize,
@@ -688,12 +688,12 @@ def test_neg_binomial(mu_alpha: Tuple[float, float], hybridize: bool) -> None:
         num_epochs=PositiveInt(15),
     )
 
-    assert (
-        np.abs(mu_hat - mu) < TOL * mu
-    ), f"mu did not match: mu = {mu}, mu_hat = {mu_hat}"
-    assert (
-        np.abs(alpha_hat - alpha) < TOL * alpha
-    ), f"alpha did not match: alpha = {alpha}, alpha_hat = {alpha_hat}"
+    assert np.isclose(
+        k_hat, k, rtol=TOL
+    ), f"n did not match: k = {k}, k_hat = {k_hat}"
+    assert np.isclose(
+        logit_hat, logit, rtol=TOL
+    ), f"logit did not match: logit = {logit}, logit_hat = {logit_hat}"
 
 
 @pytest.mark.parametrize("mu_b", [(3.3, 0.7)])
@@ -1200,13 +1200,13 @@ def test_inflated_poisson_likelihood(
 
 @pytest.mark.timeout(150)
 @pytest.mark.flaky(max_runs=6, min_passes=1)
-@pytest.mark.parametrize("mu", [5.0])
-@pytest.mark.parametrize("alpha", [0.05])
+@pytest.mark.parametrize("k", [5.0])
+@pytest.mark.parametrize("logit", [1.0])
 @pytest.mark.parametrize("zero_probability", [0.3])
 @pytest.mark.parametrize("hybridize", [False, True])
 def test_inflated_neg_binomial_likelihood(
-    mu: float,
-    alpha: float,
+    k: float,
+    logit: float,
     zero_probability: float,
     hybridize: bool,
 ) -> None:
@@ -1222,7 +1222,7 @@ def test_inflated_neg_binomial_likelihood(
             mx.nd.array(
                 [[1 - zero_probability, zero_probability]]
             ),  # mixture probs
-            mx.nd.array([mu, alpha]),  # loc, shape of Neg Bin
+            mx.nd.array([k, logit]),
             mx.nd.array([0.0]),
         ]
     )
@@ -1234,8 +1234,8 @@ def test_inflated_neg_binomial_likelihood(
 
     (
         (_, zero_probability_hat),
-        mu_hat,
-        alpha_hat,
+        k_hat,
+        logit_hat,
         _,
     ) = maximum_likelihood_estimate_sgd(
         distr_output=distr_output,
@@ -1252,9 +1252,9 @@ def test_inflated_neg_binomial_likelihood(
     ), f"zero_probability did not match: zero_probability = {zero_probability}, zero_probability_hat = {zero_probability_hat}"
 
     assert (
-        np.abs(mu_hat - mu) < TOL * mu
-    ), f"mu did not match: mu = {mu}, mu_hat = {mu_hat}"
+        np.abs(k_hat - k) < TOL * k
+    ), f"k did not match: k = {k}, k_hat = {k_hat}"
 
     assert (
-        np.abs(alpha_hat - alpha) < TOL * alpha
-    ), f"alpha did not match: alpha = {alpha}, alpha_hat = {alpha_hat}"
+        np.abs(logit_hat - logit) < TOL * logit
+    ), f"logit did not match: logit = {logit}, logit_hat = {logit_hat}"
