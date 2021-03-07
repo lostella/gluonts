@@ -110,10 +110,10 @@ class NegativeBinomialOutput(DistributionOutput):
 
     @classmethod
     def domain_map(cls, F, mu, alpha):
-        epsilon = np.finfo(cls._dtype).eps  # machine epsilon
+        sqrt_eps = np.sqrt(np.finfo(cls._dtype).eps)
 
-        mu = softplus(F, mu) + epsilon
-        alpha = softplus(F, alpha) + epsilon
+        mu = softplus(F, mu) + sqrt_eps
+        alpha = softplus(F, alpha) + sqrt_eps
         return mu.squeeze(axis=-1), alpha.squeeze(axis=-1)
 
     # Overwrites the parent class method.
