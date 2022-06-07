@@ -41,7 +41,6 @@ from gluonts.transform import (
     InstanceSampler,
     InstanceSplitter,
     SelectFields,
-    SetField,
     TestSplitSampler,
     Transformation,
     ValidationSplitSampler,
