@@ -17,10 +17,8 @@ from gluonts.dataset.common import ListDataset
 from gluonts.model.forecast import QuantileForecast
 from gluonts.mx.model.predictor import GluonPredictor
 from gluonts.mx.trainer import Trainer
-from gluonts.model.san import SelfAttentionEstimator
-from gluonts.model.san._network import (
-    SelfAttentionPredictionNetwork,
-)
+from gluonts.mx.model.san import SelfAttentionEstimator
+from gluonts.mx.model.san._network import SelfAttentionPredictionNetwork
 
 
 @pytest.fixture()
